@@ -1,5 +1,5 @@
 /*
-See LICENSE folder for this sample’s licensing information.
+See the LICENSE.txt file for this sample’s licensing information.
 
 Abstract:
 `AssetListTableViewCell` is the `UITableViewCell` subclass that represents an `Asset`
@@ -29,16 +29,16 @@ class AssetListTableViewCell: UITableViewCell {
                 let downloadState = AssetPersistenceManager.sharedManager.downloadState(for: asset)
 
                 switch downloadState {
-                case .downloaded:
+                    case .downloaded:
 
-                    downloadProgressView.isHidden = true
+                        downloadProgressView.isHidden = true
 
-                case .downloading:
+                    case .downloading:
 
-                    downloadProgressView.isHidden = false
+                        downloadProgressView.isHidden = false
 
-                case .notDownloaded:
-                    break
+                    case .notDownloaded:
+                        break
                 }
 
                 assetNameLabel.text = asset.stream.name
@@ -96,7 +96,7 @@ class AssetListTableViewCell: UITableViewCell {
     }
 }
 
-protocol AssetListTableViewCellDelegate: class {
+protocol AssetListTableViewCellDelegate: AnyObject {
 
     func assetListTableViewCell(_ cell: AssetListTableViewCell, downloadStateDidChange newState: Asset.DownloadState)
 }

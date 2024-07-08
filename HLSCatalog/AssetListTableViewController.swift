@@ -1,5 +1,5 @@
 /*
-See LICENSE folder for this sample’s licensing information.
+See the LICENSE.txt file for this sample’s licensing information.
 
 Abstract:
 `AssetListTableViewController` is the main interface of this sample.  It provides
@@ -12,6 +12,9 @@ Abstract:
 import UIKit
 import AVFoundation
 import AVKit
+import OSLog
+
+private let logger = Logger(subsystem: "com.example.apple-samplecode.HLSCatalog", category: "AssetListTableViewController")
 
 /// - Tag: AssetListTableViewController
 class AssetListTableViewController: UITableViewController {
@@ -91,7 +94,13 @@ class AssetListTableViewController: UITableViewController {
         switch downloadState {
         case .notDownloaded:
             alertAction = UIAlertAction(title: "Download", style: .default) { _ in
-                AssetPersistenceManager.sharedManager.downloadStream(for: asset)
+                Task {
+                    do {
+                        try await AssetPersistenceManager.sharedManager.downloadStream(for: asset)
+                    } catch {
+                        logger.error("Unable to download stream: \(error)")
+                    }
+                }
             }
 
         case .downloading:

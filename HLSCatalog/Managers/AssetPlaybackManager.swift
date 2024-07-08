@@ -1,28 +1,31 @@
 /*
-See LICENSE folder for this sample’s licensing information.
+See the LICENSE.txt file for this sample’s licensing information.
 
 Abstract:
 `AssetPlaybackManager` is the class that manages the playback of Assets in this
- sample using Key-value observing on various AVFoundation classes.
+ sample using key-value observing on various AVFoundation classes.
 */
 
 import UIKit
 import AVFoundation
+import os
+
+private let logger = Logger(subsystem: "com.example.apple-samplecode.HLSCatalog", category: "AssetPersistenceManager")
 
 /// - Tag: AssetPlaybackManager
 class AssetPlaybackManager: NSObject {
     
     // MARK: Properties
     
-    /// Singleton for AssetPlaybackManager.
+    /// Singleton for `AssetPlaybackManager`.
     static let sharedManager = AssetPlaybackManager()
     
     weak var delegate: AssetPlaybackDelegate?
     
-    /// The instance of AVPlayer that will be used for playback of AssetPlaybackManager.playerItem.
+    /// The instance of `AVPlayer` to use for playback of `AssetPlaybackManager.playerItem`.
     private let player = AVPlayer()
     
-    /// A Bool tracking if the AVPlayerItem.status has changed to .readyToPlay for the current AssetPlaybackManager.playerItem.
+    /// A Boolean that tracks whether `AVPlayerItem.status` has changed to `.readyToPlay` for the current `AssetPlaybackManager.playerItem`.
     private var readyForPlayback = false
     
     /// The `NSKeyValueObservation` for the KVO on \AVPlayerItem.status.
@@ -36,7 +39,7 @@ class AssetPlaybackManager: NSObject {
     
     private var perfMeasurements: PerfMeasurements?
     
-    /// The AVPlayerItem associated with AssetPlaybackManager.asset.urlAsset
+    /// The `AVPlayerItem` associated with `AssetPlaybackManager.asset.urlAsset`
     private var playerItem: AVPlayerItem? {
         willSet {
             /// Remove any previous KVO observer.
@@ -64,7 +67,7 @@ class AssetPlaybackManager: NSObject {
                 } else if item.status == .failed {
                     let error = item.error
                     
-                    print("Error: \(String(describing: error?.localizedDescription))")
+                    logger.error("Error: \(String(describing: error?.localizedDescription))")
                 }
             }
             
@@ -91,19 +94,30 @@ class AssetPlaybackManager: NSObject {
         }
         
         didSet {
-            if let asset = asset {
-                urlAssetObserver = asset.urlAsset.observe(\AVURLAsset.isPlayable, options: [.new, .initial]) { [weak self] (urlAsset, _) in
-                    guard let strongSelf = self, urlAsset.isPlayable == true else { return }
-                    
-                    strongSelf.playerItem = AVPlayerItem(asset: urlAsset)
-                    strongSelf.player.replaceCurrentItem(with: strongSelf.playerItem)
+            if let asset {
+                Task {
+                    do {
+                        if try await asset.urlAsset.load(.isPlayable) {
+                            playerItem = AVPlayerItem(asset: asset.urlAsset)
+                            player.replaceCurrentItem(with: playerItem)
+                        } else {
+                            // The asset isn't playable, so reset the player state.
+                            resetPlayer()
+                        }
+                    } catch {
+                        logger.error("Unable to load `isPlayable` property.")
+                    }
                 }
             } else {
-                playerItem = nil
-                player.replaceCurrentItem(with: nil)
-                readyForPlayback = false
+                resetPlayer()
             }
         }
+    }
+    
+    func resetPlayer() {
+        playerItem = nil
+        player.replaceCurrentItem(with: nil)
+        readyForPlayback = false
     }
     
     // MARK: Intitialization
@@ -149,7 +163,7 @@ class AssetPlaybackManager: NSObject {
 }
 
 /// AssetPlaybackDelegate provides a common interface for AssetPlaybackManager to provide callbacks to its delegate.
-protocol AssetPlaybackDelegate: class {
+protocol AssetPlaybackDelegate: AnyObject {
     
     /// This is called when the internal AVPlayer in AssetPlaybackManager is ready to start playback.
     func streamPlaybackManager(_ streamPlaybackManager: AssetPlaybackManager, playerReadyToPlay player: AVPlayer)
