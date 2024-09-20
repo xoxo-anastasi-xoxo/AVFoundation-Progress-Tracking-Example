@@ -10,6 +10,8 @@ Abstract:
 
 import UIKit
 
+
+
 class AssetListTableViewCell: UITableViewCell {
     // MARK: Properties
 
@@ -18,6 +20,9 @@ class AssetListTableViewCell: UITableViewCell {
     @IBOutlet weak var assetNameLabel: UILabel!
 
     @IBOutlet weak var downloadStateLabel: UILabel!
+
+    @IBOutlet weak var progressInfo: UITextView!
+    @IBOutlet weak var delegateInfo: UITextView!
 
     @IBOutlet weak var downloadProgressView: UIProgressView!
 
@@ -28,30 +33,20 @@ class AssetListTableViewCell: UITableViewCell {
             if let asset = asset {
                 let downloadState = AssetPersistenceManager.sharedManager.downloadState(for: asset)
 
-                switch downloadState {
-                    case .downloaded:
-
-                        downloadProgressView.isHidden = true
-
-                    case .downloading:
-
-                        downloadProgressView.isHidden = false
-
-                    case .notDownloaded:
-                        break
-                }
-
                 assetNameLabel.text = asset.stream.name
                 downloadStateLabel.text = downloadState.rawValue
-                
+                progressInfo.text = asset.progressInfo
+                delegateInfo.text = asset.delegateInfo
+
                 let notificationCenter = NotificationCenter.default
                 notificationCenter.addObserver(self,
                                                selector: #selector(handleAssetDownloadStateChanged(_:)),
                                                name: .AssetDownloadStateChanged, object: nil)
                 notificationCenter.addObserver(self, selector: #selector(handleAssetDownloadProgress(_:)),
                                                name: .AssetDownloadProgress, object: nil)
+                notificationCenter.addObserver(self, selector: #selector(handleAssetDownloadDelegate(_:)),
+                                               name: .AssetDownloadDelegate, object: nil)
             } else {
-                downloadProgressView.isHidden = false
                 assetNameLabel.text = ""
                 downloadStateLabel.text = ""
             }
@@ -69,18 +64,13 @@ class AssetListTableViewCell: UITableViewCell {
 
         DispatchQueue.main.async {
             switch downloadState {
-            case .downloading:
+            case .downloading, .paused:
                 self.downloadProgressView.isHidden = false
-
-                if let downloadSelection = notification.userInfo?[Asset.Keys.downloadSelectionDisplayName] as? String {
-                    self.downloadStateLabel.text = "\(downloadState): \(downloadSelection)"
-                    return
-                }
-
             case .downloaded, .notDownloaded:
-                self.downloadProgressView.isHidden = true
+//                self.downloadProgressView.isHidden = true
                 self.downloadProgressView.progress = 0.0
             }
+            self.downloadStateLabel.text = downloadState.rawValue
 
             self.delegate?.assetListTableViewCell(self, downloadStateDidChange: downloadState)
         }
@@ -91,8 +81,17 @@ class AssetListTableViewCell: UITableViewCell {
         guard let assetStreamName = notification.userInfo![Asset.Keys.name] as? String,
             let asset = asset, asset.stream.name == assetStreamName else { return }
         guard let progress = notification.userInfo![Asset.Keys.percentDownloaded] as? Double else { return }
-
         self.downloadProgressView.setProgress(Float(progress), animated: true)
+        guard let info = notification.userInfo![Asset.Keys.progress] as? String else { return }
+        self.progressInfo.text = info
+    }
+
+    @objc
+    func handleAssetDownloadDelegate(_ notification: NSNotification) {
+        guard let assetStreamName = notification.userInfo![Asset.Keys.name] as? String,
+            let asset = asset, asset.stream.name == assetStreamName else { return }
+        guard let info = notification.userInfo![Asset.Keys.delegate] as? String else { return }
+        self.delegateInfo.text = info
     }
 }
 

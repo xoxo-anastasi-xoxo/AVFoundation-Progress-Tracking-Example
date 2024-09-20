@@ -14,7 +14,10 @@ class Asset {
     
     /// The underlying `Stream` associated with the Asset based on the contents of the `Streams.plist` entry.
     let stream: Stream
-    
+
+    var progressInfo: String = ""
+    var delegateInfo: String = ""
+
     init(stream: Stream, urlAsset: AVURLAsset) {
         self.urlAsset = urlAsset
         self.stream = stream
@@ -37,7 +40,9 @@ extension Asset {
         
         /// The asset is not downloaded at all.
         case notDownloaded
-        
+
+        case paused
+
         /// The asset has a download in progress.
         case downloading
         
@@ -58,6 +63,9 @@ extension Asset {
          */
         static let name = "AssetNameKey"
 
+        static let progress = "AssetProgressKey"
+        static let delegate = "AssetDelegateKey"
+
         /**
          Key for the Asset download percentage, used for
          `AssetDownloadProgressNotification` Notification.
@@ -70,10 +78,5 @@ extension Asset {
          */
         static let downloadState = "AssetDownloadStateKey"
 
-        /**
-         Key for the Asset download AVMediaSelection display Name, used for
-         `AssetDownloadStateChangedNotification` Notification.
-         */
-        static let downloadSelectionDisplayName = "AssetDownloadSelectionDisplayNameKey"
     }
 }

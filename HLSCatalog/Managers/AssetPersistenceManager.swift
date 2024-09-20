@@ -105,8 +105,19 @@ class AssetPersistenceManager: NSObject {
         let progressObservation: NSKeyValueObservation = task.progress.observe(\.fractionCompleted) { progress, _ in
             Task { @MainActor in
                 var userInfo = [String: Any]()
+                let info = """
+                                Progress info:
+                                fractionCompleted = \(Int(progress.fractionCompleted * 100))% (\(progress.completedUnitCount)/\(progress.totalUnitCount))
+                                isCancelled = \(progress.isCancelled)
+                                isCancellable = \(progress.isCancellable)
+                                isPaused = \(progress.isPaused)
+                                isPausable = \(progress.isPausable)
+                                isFinished = \(progress.isFinished)
+                                """
                 userInfo[Asset.Keys.name] = asset.stream.name
+                userInfo[Asset.Keys.progress] = info
                 userInfo[Asset.Keys.percentDownloaded] = progress.fractionCompleted
+                asset.progressInfo = info
                 NotificationCenter.default.post(name: .AssetDownloadProgress, object: nil, userInfo: userInfo)
             }
         }
@@ -117,7 +128,6 @@ class AssetPersistenceManager: NSObject {
         var userInfo = [String: Any]()
         userInfo[Asset.Keys.name] = asset.stream.name
         userInfo[Asset.Keys.downloadState] = Asset.DownloadState.downloading.rawValue
-        userInfo[Asset.Keys.downloadSelectionDisplayName] = await displayNamesForSelectedMediaOptions(preferredMediaSelection)
 
         NotificationCenter.default.post(name: .AssetDownloadStateChanged, object: nil, userInfo: userInfo)
     }
@@ -171,8 +181,8 @@ class AssetPersistenceManager: NSObject {
         }
 
         // Check if there are any active downloads in flight.
-        for (_, assetValue) in activeDownloadsMap where asset.stream.name == assetValue.stream.name {
-            return .downloading
+        for (task, assetValue) in activeDownloadsMap where asset.stream.name == assetValue.stream.name {
+            return task.state == .suspended ? .paused : .downloading
         }
 
         return .notDownloaded
@@ -212,47 +222,84 @@ class AssetPersistenceManager: NSObject {
         }
 
         task?.cancel()
-    }
-}
+    } 
 
-/// Return the display names for the media selection options that are currently selected in the specified group
-func displayNamesForSelectedMediaOptions(_ mediaSelection: AVMediaSelection) async -> String {
+    func pauseDownload(for asset: Asset) {
+        var task: AVAssetDownloadTask?
 
-    var displayNames = ""
-
-    guard let asset = mediaSelection.asset else {
-        return displayNames
-    }
-
-    guard let characteristics = try? await asset.load(.availableMediaCharacteristicsWithMediaSelectionOptions) else {
-        return displayNames
-    }
-    
-    // Iterate over every media characteristic in the asset in which a media selection option is available.
-    for mediaCharacteristic in characteristics {
-        /*
-         Obtain the AVMediaSelectionGroup object that contains one or more options with the
-         specified media characteristic, then get the media selection option that's currently
-         selected in the specified group.
-         */
-        guard let mediaSelectionGroup = try? await asset.loadMediaSelectionGroup(for: mediaCharacteristic),
-            let option = mediaSelection.selectedMediaOption(in: mediaSelectionGroup) else { continue }
-
-        // Obtain the display string for the media selection option.
-        if displayNames.isEmpty {
-            displayNames += " " + option.displayName
-        } else {
-            displayNames += ", " + option.displayName
+        for (taskKey, assetVal) in activeDownloadsMap where asset == assetVal {
+            task = taskKey
+            break
         }
+
+        task?.suspend()
+
+        var userInfo = [String: Any]()
+        userInfo[Asset.Keys.name] = asset.stream.name
+        userInfo[Asset.Keys.downloadState] = Asset.DownloadState.paused.rawValue
+
+        NotificationCenter.default.post(name: .AssetDownloadStateChanged, object: nil,
+                                        userInfo: userInfo)
     }
 
-    return displayNames
+    func resumeDownload(for asset: Asset) {
+        var task: AVAssetDownloadTask?
+
+        for (taskKey, assetVal) in activeDownloadsMap where asset == assetVal {
+            task = taskKey
+            break
+        }
+
+        task?.resume()
+
+        var userInfo = [String: Any]()
+        userInfo[Asset.Keys.name] = asset.stream.name
+        userInfo[Asset.Keys.downloadState] = Asset.DownloadState.downloading.rawValue
+
+        NotificationCenter.default.post(name: .AssetDownloadStateChanged, object: nil,
+                                        userInfo: userInfo)
+    }
 }
 
 /**
  Extend `AssetPersistenceManager` to conform to the `AVAssetDownloadDelegate` protocol.
  */
 extension AssetPersistenceManager: AVAssetDownloadDelegate {
+
+    func urlSession(
+            _ session: URLSession,
+            assetDownloadTask task: AVAssetDownloadTask,
+            didLoad timeRange: CMTimeRange,
+            totalTimeRangesLoaded loadedTimeRanges: [NSValue],
+            timeRangeExpectedToLoad: CMTimeRange
+        ) {
+            guard let asset = activeDownloadsMap[task] else { return }
+
+            let percent = loadedTimeRanges.reduce(0.0) { partialResult, loadedTimeRange in
+                partialResult + CMTimeGetSeconds(loadedTimeRange.timeRangeValue.duration) /
+                    CMTimeGetSeconds(timeRangeExpectedToLoad.duration)
+
+            }
+            var userInfo = [String: Any]()
+            let info = """
+                            AVAssetDownloadDelegate info:
+                            didLoad = \(CMTimeGetSeconds(timeRange.duration))
+                            loadedTimeRanges = \(CMTimeGetSeconds(loadedTimeRanges[0].timeRangeValue.duration))
+                            timeRangeExpectedToLoad \(CMTimeGetSeconds(timeRangeExpectedToLoad.duration))
+                            calculatedProgress = \(Int(percent * 100))%
+                            fractionCompleted = \(Int(task.progress.fractionCompleted * 100))% (\(task.progress.completedUnitCount)/\(task.progress.totalUnitCount))
+                            isCancelled = \(task.progress.isCancelled)
+                            isCancellable = \(task.progress.isCancellable)
+                            isPaused = \(task.progress.isPaused)
+                            isPausable = \(task.progress.isPausable)
+                            isFinished = \(task.progress.isFinished)
+                            """
+            userInfo[Asset.Keys.name] = asset.stream.name
+            userInfo[Asset.Keys.delegate] = info
+            asset.delegateInfo = info
+            NotificationCenter.default.post(name: .AssetDownloadDelegate, object: nil, userInfo: userInfo)
+
+        }
 
     /// Tells the delegate that the task finished transferring data.
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
@@ -303,25 +350,29 @@ extension AssetPersistenceManager: AVAssetDownloadDelegate {
             }
 
             userInfo[Asset.Keys.downloadState] = Asset.DownloadState.downloaded.rawValue
-            userInfo[Asset.Keys.downloadSelectionDisplayName] = ""
         }
 
         NotificationCenter.default.post(name: .AssetDownloadStateChanged, object: nil, userInfo: userInfo)
     }
 
-    /// Method called when the an `AVAssetDownloadTask` determines the location this asset is downloaded to.
-    func urlSession(_ session: URLSession, assetDownloadTask avAssetDownloadTask: AVAssetDownloadTask,
-                    willDownloadTo location: URL) {
-
-        /*
-         Only use this delegate callback to save the location URL
-         somewhere in your app. Any additional work should be done in
-         `URLSessionTaskDelegate.urlSession(_:task:didCompleteWithError:)`.
-         */
-
-        willDownloadToUrlMap[avAssetDownloadTask] = location
+//    /// Method called when the an `AVAssetDownloadTask` determines the location this asset is downloaded to.
+//    func urlSession(_ session: URLSession, assetDownloadTask avAssetDownloadTask: AVAssetDownloadTask,
+//                    willDownloadTo location: URL) {
+//
+//        /*
+//         Only use this delegate callback to save the location URL
+//         somewhere in your app. Any additional work should be done in
+//         `URLSessionTaskDelegate.urlSession(_:task:didCompleteWithError:)`.
+//         */
+//
+//        willDownloadToUrlMap[avAssetDownloadTask] = location
+//    }
+    public nonisolated func urlSession(
+        _ session: URLSession, assetDownloadTask: AVAssetDownloadTask, didFinishDownloadingTo location: URL
+    ) {
+        willDownloadToUrlMap[assetDownloadTask] = location
     }
-    
+
     /// Method called when the an `AVAssetDownloadTask` determines the variants it downloads.
     func urlSession(_ session: URLSession, assetDownloadTask avAssetDownloadTask: AVAssetDownloadTask,
                     willDownloadVariants variants: [AVAssetVariant]) {
@@ -343,7 +394,8 @@ extension AssetPersistenceManager: AVAssetDownloadDelegate {
 extension Notification.Name {
     /// Notification for when download progress has changed.
     static let AssetDownloadProgress = Notification.Name(rawValue: "AssetDownloadProgressNotification")
-    
+    static let AssetDownloadDelegate = Notification.Name(rawValue: "AssetDownloadDelegateNotification")
+
     /// Notification for when the download state of an `Asset` has changed.
     static let AssetDownloadStateChanged = Notification.Name(rawValue: "AssetDownloadStateChangedNotification")
     

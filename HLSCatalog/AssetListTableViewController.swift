@@ -104,13 +104,17 @@ class AssetListTableViewController: UITableViewController {
             }
 
         case .downloading:
-            alertAction = UIAlertAction(title: "Cancel", style: .default) { _ in
-                AssetPersistenceManager.sharedManager.cancelDownload(for: asset)
+            alertAction = UIAlertAction(title: "Pause", style: .default) { _ in
+                AssetPersistenceManager.sharedManager.pauseDownload(for: asset)
             }
 
         case .downloaded:
             alertAction = UIAlertAction(title: "Delete", style: .default) { _ in
                 AssetPersistenceManager.sharedManager.deleteAsset(asset)
+            }
+        case .paused:
+            alertAction = UIAlertAction(title: "Resume", style: .default) { _ in
+                AssetPersistenceManager.sharedManager.resumeDownload(for: asset)
             }
         }
 
